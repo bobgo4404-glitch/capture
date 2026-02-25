@@ -1,0 +1,1778 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>보안 캡처 예외사용 관리대장</title>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-analytics-compat.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Google Fonts: Noto Sans KR -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['"Noto Sans KR"', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            200: '#bae6fd',
+                            300: '#7dd3fc',
+                            400: '#38bdf8',
+                            500: '#0ea5e9',
+                            600: '#0284c7',
+                            700: '#0369a1',
+                            800: '#075985',
+                            900: '#0c4a6e',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        body { background-color: #f1f5f9; }
+        /* Scrollbar custom */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .fade-in { animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        
+        /* Bar Chart Animation */
+        .bar-grow { animation: growUp 0.6s ease-out forwards; transform-origin: bottom; transform: scaleY(0); }
+        @keyframes growUp { to { transform: scaleY(1); } }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
+
+
+        const FIREBASE_CONFIG = {
+            apiKey: "AIzaSyA9-g6WtLs7u3Txo3bSg2XP0Gm3E-HFDaY",
+            authDomain: "dol-party.firebaseapp.com",
+            projectId: "dol-party",
+            storageBucket: "dol-party.firebasestorage.app",
+            messagingSenderId: "489405410374",
+            appId: "1:489405410374:web:a548b8304b6bd8b1fcee47",
+            measurementId: "G-5KVHGPT6V3"
+        };
+        const FIREBASE_COLLECTION = 'sec_capture_exception';
+        const FIREBASE_DOC_ID = 'main';
+
+        // --- Utility Components ---
+        
+        const Card = ({ children, className = "" }) => (
+            <div className={`bg-white rounded-lg shadow-sm border border-slate-200 p-6 ${className}`}>
+                {children}
+            </div>
+        );
+
+        const Button = ({ onClick, children, variant = "primary", className = "", type = "button", disabled = false }) => {
+            const baseStyle = "px-4 py-2 rounded-md font-medium transition-all duration-200 flex items-center gap-2 justify-center disabled:opacity-50 disabled:cursor-not-allowed";
+            const variants = {
+                primary: "bg-brand-600 text-white hover:bg-brand-700 active:bg-brand-900",
+                secondary: "bg-white text-slate-700 border border-slate-300 hover:bg-slate-50",
+                danger: "bg-red-50 text-red-600 border border-red-200 hover:bg-red-100",
+                ghost: "text-slate-500 hover:text-brand-600 hover:bg-slate-100"
+            };
+            return (
+                <button type={type} onClick={onClick} disabled={disabled} className={`${baseStyle} ${variants[variant]} ${className}`}>
+                    {children}
+                </button>
+            );
+        };
+
+        const Badge = ({ children, color = "blue" }) => {
+            const colors = {
+                blue: "bg-blue-100 text-blue-800",
+                green: "bg-green-100 text-green-800",
+                red: "bg-red-100 text-red-800",
+                gray: "bg-slate-100 text-slate-800",
+                yellow: "bg-yellow-100 text-yellow-800",
+                purple: "bg-purple-100 text-purple-800"
+            };
+            return <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${colors[color]}`}>{children}</span>;
+        };
+
+        const Toast = ({ message, type, onClose }) => {
+            useEffect(() => {
+                const timer = setTimeout(onClose, 3000);
+                return () => clearTimeout(timer);
+            }, [onClose]);
+
+            const bgClass = type === 'success' ? 'bg-green-600' : 'bg-red-600';
+            return (
+                <div className={`fixed bottom-4 right-4 ${bgClass} text-white px-6 py-3 rounded shadow-lg z-50 flex items-center gap-3 fade-in`}>
+                    <i className={`fa-solid ${type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle'}`}></i>
+                    {message}
+                </div>
+            );
+        };
+
+        // --- Logic Helpers ---
+
+        const generateId = () => '_' + Math.random().toString(36).substr(2, 9);
+        
+        const formatDate = (dateStr) => {
+            if (!dateStr) return '-';
+            return new Date(dateStr).toLocaleDateString('ko-KR');
+        };
+
+        const getDaysDiff = (start, end, isPermanent) => {
+            if (isPermanent) return '무기한';
+            if (!start || !end) return '-';
+            const s = new Date(start);
+            const e = new Date(end);
+            return Math.ceil((e - s) / (1000 * 60 * 60 * 24)) + 1 + '일간';
+        };
+
+        const compactText = (value) => (value || '').replace(/\s+/g, ' ').trim();
+
+        const getGanttLabel = (exemption, maxLen = 28) => {
+            const reason = compactText(exemption.reason);
+            const fallback = exemption.docNumber ? ('#' + exemption.docNumber) : '-';
+            const base = reason || fallback;
+            return base.length > maxLen ? (base.slice(0, maxLen) + '…') : base;
+        };
+
+        // [수정됨] 날짜 비교 로직 개선 (Timezone 이슈 해결)
+        const getTodayString = () => {
+            const d = new Date();
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        };
+
+        const isExemptionActive = (exemption) => {
+            const today = getTodayString();
+            const start = exemption.startDate;
+            if (exemption.isPermanent) {
+                return today >= start;
+            }
+            const end = exemption.endDate;
+            return today >= start && today <= end;
+        };
+
+        // --- Chart Components ---
+
+        const TrendChart = ({ data, labels }) => {
+            const [hoveredIndex, setHoveredIndex] = useState(null);
+            const containerRef = useRef(null);
+            const [width, setWidth] = useState(0);
+            const height = 220; 
+            const padding = { top: 20, right: 20, bottom: 25, left: 35 };
+
+            useEffect(() => {
+                if(containerRef.current) {
+                    setWidth(containerRef.current.offsetWidth);
+                }
+                const handleResize = () => {
+                    if(containerRef.current) setWidth(containerRef.current.offsetWidth);
+                }
+                window.addEventListener('resize', handleResize);
+                return () => window.removeEventListener('resize', handleResize);
+            }, []);
+
+            if (data.length === 0) return <div className="h-full flex items-center justify-center text-slate-400">데이터 없음</div>;
+
+            const maxVal = Math.max(...data);
+            const minVal = Math.min(...data);
+            
+            // Dynamic Scaling Logic
+            // 데이터 변동폭에 따라 Y축 스케일을 유동적으로 조정
+            let yMin = minVal - (maxVal - minVal) * 0.5;
+            let yMax = maxVal + (maxVal - minVal) * 0.5;
+            
+            // 데이터가 모두 같거나 변동이 적을 때를 위한 안전장치
+            if (maxVal === minVal || yMin === yMax) {
+                yMin = Math.max(0, minVal - 5);
+                yMax = maxVal + 5;
+            }
+            yMin = Math.max(0, Math.floor(yMin));
+            yMax = Math.ceil(yMax);
+
+            const getX = (index) => {
+                const denom = Math.max(1, data.length - 1);
+                return padding.left + (index / denom) * (width - padding.left - padding.right);
+            };
+            const getY = (val) => height - padding.bottom - ((val - yMin) / (yMax - yMin)) * (height - padding.top - padding.bottom);
+
+            const points = data.map((val, i) => `${getX(i)},${getY(val)}`).join(' ');
+            const areaPath = `${points} ${getX(data.length - 1)},${height - padding.bottom} ${getX(0)},${height - padding.bottom}`;
+
+            return (
+                <div ref={containerRef} className="w-full h-full relative select-none overflow-hidden">
+                    {width > 0 && (
+                        <svg width={width} height={height} className="block overflow-hidden max-w-full">
+                            {/* Grid Lines & Y Axis Labels */}
+                            {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
+                                const yVal = yMin + (yMax - yMin) * ratio;
+                                const yPos = getY(yVal);
+                                return (
+                                    <g key={ratio}>
+                                        <line x1={padding.left} y1={yPos} x2={width - padding.right} y2={yPos} stroke="#f1f5f9" strokeDasharray="4 4" />
+                                        <text x={padding.left - 8} y={yPos + 3} textAnchor="end" fontSize="10" fill="#94a3b8" className="font-mono">{Math.round(yVal)}</text>
+                                    </g>
+                                );
+                            })}
+
+                            {/* Area Fill */}
+                            <defs>
+                                <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="0%" stopColor="#0ea5e9" stopOpacity="0.3"/>
+                                    <stop offset="100%" stopColor="#0ea5e9" stopOpacity="0"/>
+                                </linearGradient>
+                            </defs>
+                            <path d={`M ${areaPath} Z`} fill="url(#chartGradient)" stroke="none" />
+
+                            {/* Line */}
+                            <polyline points={points} fill="none" stroke="#0ea5e9" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+
+                            {/* Points */}
+                            {data.map((val, i) => (
+                                <g key={i} 
+                                   onMouseEnter={() => setHoveredIndex(i)} 
+                                   onMouseLeave={() => setHoveredIndex(null)}>
+                                    {/* Invisible larger circle for easier hovering */}
+                                    <circle cx={getX(i)} cy={getY(val)} r={10} fill="transparent" cursor="pointer" />
+                                    {/* Visible Circle */}
+                                    <circle 
+                                        cx={getX(i)} 
+                                        cy={getY(val)} 
+                                        r={hoveredIndex === i ? 5 : 3.5} 
+                                        fill={hoveredIndex === i ? "#0284c7" : "white"} 
+                                        stroke="#0ea5e9" 
+                                        strokeWidth="2" 
+                                        className="transition-all duration-200 pointer-events-none"
+                                    />
+                                </g>
+                            ))}
+                        </svg>
+                    )}
+                    
+                    {/* Tooltip */}
+                    {hoveredIndex !== null && (
+                        <div 
+                            className="absolute bg-slate-800 text-white text-xs rounded py-1 px-2 pointer-events-none transform -translate-x-1/2 -translate-y-full shadow-lg z-20"
+                            style={{ 
+                                left: getX(hoveredIndex), 
+                                top: getY(data[hoveredIndex]) - 10 
+                            }}
+                        >
+                            <div className="font-bold mb-0.5">{labels[hoveredIndex]}</div>
+                            <div className="text-center">{data[hoveredIndex]}명</div>
+                            <div className="absolute bottom-[-4px] left-1/2 -translate-x-1/2 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-slate-800"></div>
+                        </div>
+                    )}
+                    
+                    {/* X Axis Labels */}
+                    <div className="absolute bottom-0 w-full text-[10px] text-slate-400">
+                        {labels.map((l, i) => (
+                            <span key={i} style={{ position: 'absolute', left: getX(i), transform: 'translateX(-50%)' }}>{l}</span>
+                        ))}
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Gantt Components ---
+
+        const MonthGantt = ({ year, initialMonth, exemptions }) => {
+            const [currentViewMonth, setCurrentViewMonth] = useState(initialMonth);
+            
+            const viewDaysInMonth = new Date(year, currentViewMonth + 1, 0).getDate();
+            const viewDays = Array.from({length: viewDaysInMonth}, (_, i) => i + 1);
+            const todayDate = new Date().getDate();
+            const isCurrentMonth = new Date().getMonth() === currentViewMonth && new Date().getFullYear() === year;
+
+            const viewActiveExemptions = exemptions.filter(e => {
+                const start = new Date(e.startDate);
+                const end = e.isPermanent ? new Date(year, 11, 31) : new Date(e.endDate);
+                const viewStart = new Date(year, currentViewMonth, 1);
+                const viewEnd = new Date(year, currentViewMonth, viewDaysInMonth);
+                return start <= viewEnd && end >= viewStart;
+            });
+
+            return (
+                <div className="fade-in">
+                    <div className="flex justify-center items-center gap-4 mb-4">
+                        <button onClick={() => setCurrentViewMonth(m => m === 0 ? 11 : m - 1)} className="p-2 text-slate-400 hover:text-brand-600">
+                            <i className="fa-solid fa-chevron-left"></i>
+                        </button>
+                        <span className="font-bold text-slate-700 w-32 text-center">{year}년 {currentViewMonth + 1}월</span>
+                        <button onClick={() => setCurrentViewMonth(m => m === 11 ? 0 : m + 1)} className="p-2 text-slate-400 hover:text-brand-600">
+                            <i className="fa-solid fa-chevron-right"></i>
+                        </button>
+                    </div>
+
+                    <div className="overflow-x-auto border rounded border-slate-200">
+                        <div className="min-w-[800px]">
+                            <div className="grid grid-cols-[150px_1fr] border-b border-slate-200 bg-white">
+                                <div className="p-2 font-bold text-xs text-slate-500 sticky left-0 z-20 bg-white border-r border-slate-100 flex items-center justify-center">사용자</div>
+                                <div className="grid" style={{ gridTemplateColumns: `repeat(${viewDaysInMonth}, 1fr)` }}>
+                                    {viewDays.map(d => (
+                                        <div key={d} className={`text-center text-[10px] text-slate-400 border-l border-slate-100 py-2 ${isCurrentMonth && d === todayDate ? 'bg-blue-50 font-bold text-blue-600' : ''}`}>
+                                            {d}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                            {viewActiveExemptions.length === 0 ? (
+                                <div className="p-8 text-center text-slate-400">표시할 데이터가 없습니다.</div>
+                            ) : (
+                                viewActiveExemptions.map(ex => {
+                                    const start = new Date(ex.startDate);
+                                    let startDay = start.getDate();
+                                    let endDay = viewDaysInMonth;
+                                    if (!ex.isPermanent) {
+                                        const end = new Date(ex.endDate);
+                                        if (end.getMonth() === currentViewMonth && end.getFullYear() === year) endDay = end.getDate();
+                                        if (start.getMonth() < currentViewMonth || start.getFullYear() < year) startDay = 1;
+                                        if (end.getMonth() < currentViewMonth && end.getFullYear() === year) return null;
+                                        if (end.getMonth() > currentViewMonth || end.getFullYear() > year) endDay = viewDaysInMonth;
+                                    } else {
+                                         if (start.getMonth() < currentViewMonth || start.getFullYear() < year) startDay = 1;
+                                    }
+                                    if (start.getMonth() === currentViewMonth && start.getFullYear() === year) startDay = start.getDate();
+                                    const duration = endDay - startDay + 1;
+                                    const isPerm = ex.isPermanent;
+                                    return (
+                                        <div key={ex.id} className="grid grid-cols-[150px_1fr] border-b border-slate-100 hover:bg-slate-50 transition-colors h-10 items-center">
+                                            <div className="px-3 text-sm font-medium text-slate-700 truncate sticky left-0 bg-white z-10 border-r border-slate-100 h-full flex items-center shadow-[1px_0_3px_rgba(0,0,0,0.05)]">
+                                                {ex.userName}
+                                                {isPerm && <i className="fa-solid fa-infinity text-xs text-purple-500 ml-2" title="항시 예외"></i>}
+                                            </div>
+                                            <div className="relative h-full w-full grid" style={{ gridTemplateColumns: `repeat(${viewDaysInMonth}, 1fr)` }}>
+                                                {viewDays.map(d => <div key={d} className="border-l border-slate-100 h-full"></div>)}
+                                                <div className={`absolute top-2 bottom-2 rounded border cursor-pointer flex items-center px-2 group ${isPerm ? 'bg-purple-200 border-purple-400 hover:bg-purple-300' : 'bg-brand-200 border-brand-400 hover:bg-brand-300'}`}
+                                                    style={{ left: `${((startDay - 1) / viewDaysInMonth) * 100}%`, width: `${(duration / viewDaysInMonth) * 100}%` }}
+                                                    title={`${ex.startDate} ~ ${isPerm ? '항시' : ex.endDate} | ${compactText(ex.reason) || ('#' + (ex.docNumber || 'N/A'))}`}>
+                                                    <span className={`text-[10px] font-bold truncate block group-hover:opacity-100 w-full ${isPerm ? 'text-purple-800' : 'text-brand-800'}`}>{getGanttLabel(ex, 28)}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const YearGantt = ({ year, exemptions }) => {
+            const months = Array.from({length: 12}, (_, i) => i + 1);
+            const activeExemptions = exemptions.filter(e => {
+                const start = new Date(e.startDate);
+                if (e.isPermanent) return start.getFullYear() <= year;
+                const end = new Date(e.endDate);
+                return start.getFullYear() <= year && end.getFullYear() >= year;
+            });
+            return (
+                 <div className="overflow-x-auto border rounded border-slate-200">
+                    <div className="bg-slate-50 border-b border-slate-200 px-4 py-2 text-sm font-bold text-slate-700">{year}년 전체</div>
+                    <div className="min-w-[800px]">
+                        <div className="grid grid-cols-[150px_1fr] border-b border-slate-200 bg-white">
+                            <div className="p-2 font-bold text-xs text-slate-500 sticky left-0 z-20 bg-white border-r border-slate-100 flex items-center justify-center">사용자</div>
+                            <div className="grid grid-cols-12">{months.map(m => <div key={m} className="text-center text-xs text-slate-500 border-l border-slate-100 py-2 font-medium">{m}월</div>)}</div>
+                        </div>
+                         {activeExemptions.length === 0 ? <div className="p-8 text-center text-slate-400">표시할 데이터가 없습니다.</div> : activeExemptions.map(ex => {
+                                const start = new Date(ex.startDate);
+                                let startMonth = start.getMonth(); 
+                                let endMonth = 11;
+                                if (!ex.isPermanent) {
+                                    const end = new Date(ex.endDate);
+                                    if (end.getFullYear() < year) return null;
+                                    if (end.getFullYear() === year) endMonth = end.getMonth();
+                                }
+                                if (start.getFullYear() < year) startMonth = 0;
+                                const durationMonths = endMonth - startMonth + 1;
+                                const isPerm = ex.isPermanent;
+                                return (
+                                    <div key={ex.id} className="grid grid-cols-[150px_1fr] border-b border-slate-100 hover:bg-slate-50 transition-colors h-10 items-center">
+                                        <div className="px-3 text-sm font-medium text-slate-700 truncate sticky left-0 bg-white z-10 border-r border-slate-100 h-full flex items-center shadow-[1px_0_3px_rgba(0,0,0,0.05)]">
+                                            {ex.userName} {isPerm && <i className="fa-solid fa-infinity text-xs text-purple-500 ml-2"></i>}
+                                        </div>
+                                        <div className="relative h-full w-full grid grid-cols-12">
+                                            {months.map(m => <div key={m} className="border-l border-slate-100 h-full"></div>)}
+                                            <div className={`absolute top-2 bottom-2 rounded border cursor-pointer flex items-center px-2 group ${isPerm ? 'bg-purple-200 border-purple-400 hover:bg-purple-300' : 'bg-indigo-200 border-indigo-400 hover:bg-indigo-300'}`}
+                                                style={{ left: `${(startMonth / 12) * 100}%`, width: `${(durationMonths / 12) * 100}%` }}
+                                                title={`${ex.startDate} ~ ${isPerm ? '항시' : ex.endDate} | ${compactText(ex.reason) || ('#' + (ex.docNumber || 'N/A'))}`}>
+                                                <span className={`text-[10px] font-bold truncate block group-hover:opacity-100 w-full ${isPerm ? 'text-purple-800' : 'text-indigo-800'}`}>{getGanttLabel(ex, 20)}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })
+                        }
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Main App Component ---
+
+        function App() {
+            // State
+            const [view, setView] = useState('dashboard');
+            const [users, setUsers] = useState([]);
+            const [exemptions, setExemptions] = useState([]);
+            const [departments, setDepartments] = useState(['보안팀', '인사팀', '개발팀', '영업팀']);
+            const [jobTitles, setJobTitles] = useState(['사원', '대리', '과장', '차장', '부장', '팀장']);
+            const [availableYears, setAvailableYears] = useState(['2024', '2025', '2026']);
+            const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+            const [ganttMode, setGanttMode] = useState('month'); 
+            const [toast, setToast] = useState(null);
+            const [isExemptModalOpen, setIsExemptModalOpen] = useState(false);
+            const [isPermanentFormValue, setIsPermanentFormValue] = useState(false);
+            const [logs, setLogs] = useState([]);
+            const [backups, setBackups] = useState([]);
+            const [isPdfParsing, setIsPdfParsing] = useState(false);
+            const [pdfApprovalStatus, setPdfApprovalStatus] = useState(null);
+            const [uploadedPdfName, setUploadedPdfName] = useState('');
+            const [cloudStatus, setCloudStatus] = useState('checking');
+            const exemptFormRef = useRef(null);
+            const cloudSyncRef = useRef({ enabled: false, docRef: null });
+            const cloudSaveTimerRef = useRef(null);
+
+            // Data persistence helpers
+            const showToast = (message, type = 'success') => setToast({ message, type });
+
+            const normalizePayload = (raw, fallback = {}) => {
+                const safeArray = (v, fb = []) => (Array.isArray(v) ? v : fb);
+                const usersData = safeArray(raw.users, safeArray(fallback.users));
+                const exemptionsData = safeArray(raw.exemptions, safeArray(fallback.exemptions));
+                const departmentsData = safeArray(raw.departments, safeArray(fallback.departments, ['보안팀', '인사팀', '개발팀', '영업팀']));
+                const jobTitlesData = safeArray(raw.jobTitles, safeArray(fallback.jobTitles, ['사원', '대리', '과장', '차장', '부장', '팀장']));
+                const yearsData = safeArray(raw.availableYears, safeArray(fallback.availableYears, ['2024', '2025', '2026'])).map(String).sort((a, b) => Number(a) - Number(b));
+                const logsData = safeArray(raw.logs, safeArray(fallback.logs)).slice(0, 500);
+                const backupsData = safeArray(raw.backups, safeArray(fallback.backups)).slice(0, 7);
+                return {
+                    users: usersData,
+                    exemptions: exemptionsData,
+                    departments: departmentsData,
+                    jobTitles: jobTitlesData,
+                    availableYears: yearsData,
+                    logs: logsData,
+                    backups: backupsData
+                };
+            };
+
+            const persistLocalPayload = (payload, updatedAt = null) => {
+                localStorage.setItem('sec_app_users', JSON.stringify(payload.users));
+                localStorage.setItem('sec_app_exemptions', JSON.stringify(payload.exemptions));
+                localStorage.setItem('sec_app_depts', JSON.stringify(payload.departments));
+                localStorage.setItem('sec_app_titles', JSON.stringify(payload.jobTitles));
+                localStorage.setItem('sec_app_years', JSON.stringify(payload.availableYears));
+                localStorage.setItem('sec_app_logs', JSON.stringify(payload.logs));
+                localStorage.setItem('sec_app_backups', JSON.stringify(payload.backups));
+                localStorage.setItem('sec_app_updated_at', updatedAt || new Date().toISOString());
+            };
+
+            const applyPayloadToState = (payload) => {
+                setUsers(payload.users);
+                setExemptions(payload.exemptions);
+                setDepartments(payload.departments);
+                setJobTitles(payload.jobTitles);
+                setAvailableYears(payload.availableYears);
+                setLogs(payload.logs);
+                setBackups(payload.backups);
+            };
+
+            const buildPayload = (overrides = {}) => ({
+                users: overrides.users ?? users,
+                exemptions: overrides.exemptions ?? exemptions,
+                departments: overrides.departments ?? departments,
+                jobTitles: overrides.jobTitles ?? jobTitles,
+                availableYears: (overrides.availableYears ?? availableYears).map(String).sort((a, b) => Number(a) - Number(b)),
+                logs: (overrides.logs ?? logs).slice(0, 500),
+                backups: (overrides.backups ?? backups).slice(0, 7)
+            });
+
+            const scheduleCloudSave = (overrides = {}) => {
+                const payload = buildPayload(overrides);
+
+                const stampedAt = new Date().toISOString();
+                persistLocalPayload(payload, stampedAt); // immediate local cache for refresh safety
+
+                if (!cloudSyncRef.current.enabled || !cloudSyncRef.current.docRef) {
+                    setCloudStatus('local');
+                    return;
+                }
+
+                if (cloudSaveTimerRef.current) clearTimeout(cloudSaveTimerRef.current);
+                setCloudStatus('syncing');
+                cloudSaveTimerRef.current = setTimeout(async () => {
+                    try {
+                        await cloudSyncRef.current.docRef.set({ ...payload, updatedAt: stampedAt }, { merge: true });
+                        setCloudStatus('connected');
+                    } catch (err) {
+                        console.error('Cloud sync save error', err);
+                        setCloudStatus('error');
+                    }
+                }, 450);
+            };
+
+            // Load Data (local first, then cloud)
+            useEffect(() => {
+                let unmounted = false;
+
+                const init = async () => {
+                    try {
+                        const localRaw = {
+                            users: JSON.parse(localStorage.getItem('sec_app_users') || '[]'),
+                            exemptions: JSON.parse(localStorage.getItem('sec_app_exemptions') || '[]'),
+                            departments: JSON.parse(localStorage.getItem('sec_app_depts') || '["보안팀","인사팀","개발팀","영업팀"]'),
+                            jobTitles: JSON.parse(localStorage.getItem('sec_app_titles') || '["사원","대리","과장","차장","부장","팀장"]'),
+                            availableYears: JSON.parse(localStorage.getItem('sec_app_years') || '["2024","2025","2026"]'),
+                            logs: JSON.parse(localStorage.getItem('sec_app_logs') || '[]'),
+                            backups: JSON.parse(localStorage.getItem('sec_app_backups') || '[]'),
+                            updatedAt: localStorage.getItem('sec_app_updated_at') || null
+                        };
+                        const localPayload = normalizePayload(localRaw, localRaw);
+                        if (!unmounted) applyPayloadToState(localPayload);
+
+                        if (!window.firebase || !window.firebase.firestore) {
+                            setCloudStatus('local');
+                            return;
+                        }
+
+                        if (!window.firebase.apps.length) {
+                            window.firebase.initializeApp(FIREBASE_CONFIG);
+                            try { window.firebase.analytics(); } catch (err) { console.warn('Firebase analytics init skipped', err); }
+                        }
+
+                        const db = window.firebase.firestore();
+                        const docRef = db.collection(FIREBASE_COLLECTION).doc(FIREBASE_DOC_ID);
+                        cloudSyncRef.current = { enabled: true, docRef };
+                        setCloudStatus('connected');
+
+                        const snap = await docRef.get();
+                        if (!snap.exists) {
+                            await docRef.set({ ...localPayload, updatedAt: new Date().toISOString() }, { merge: true });
+                            setCloudStatus('connected');
+                            return;
+                        }
+
+                        const cloudRaw = snap.data() || {};
+                        const cloudPayload = normalizePayload(cloudRaw, localPayload);
+                        const localTs = Date.parse(localRaw.updatedAt || '') || 0;
+                        const cloudTs = Date.parse(cloudRaw.updatedAt || '') || 0;
+
+                        if (!unmounted) {
+                            if (cloudTs >= localTs) {
+                                applyPayloadToState(cloudPayload);
+                                persistLocalPayload(cloudPayload, cloudRaw.updatedAt || new Date().toISOString());
+                            } else {
+                                // Local cache is newer (e.g., recent edits before cloud sync finished)
+                                applyPayloadToState(localPayload);
+                                scheduleCloudSave(localPayload);
+                            }
+                        }
+                    } catch (e) {
+                        console.error('Data load error', e);
+                        setCloudStatus('error');
+                        showToast('데이터 로드 중 오류가 발생했습니다.', 'error');
+                    }
+                };
+
+                init();
+                return () => {
+                    unmounted = true;
+                    if (cloudSaveTimerRef.current) clearTimeout(cloudSaveTimerRef.current);
+                };
+            }, []);
+
+            const saveExemptions = (newExemptions) => {
+                setExemptions(newExemptions);
+                scheduleCloudSave({ exemptions: newExemptions });
+            };
+            const saveUsers = (newUsers) => {
+                setUsers(newUsers);
+                scheduleCloudSave({ users: newUsers });
+            };
+            const saveSettings = (newDepts, newTitles, newYears) => {
+                const normalizedYears = newYears.map(String).sort((a, b) => Number(a) - Number(b));
+                setDepartments(newDepts);
+                setJobTitles(newTitles);
+                setAvailableYears(normalizedYears);
+                scheduleCloudSave({ departments: newDepts, jobTitles: newTitles, availableYears: normalizedYears });
+                addLog('SETTINGS_UPDATE', '조직/직급/연도 설정 저장');
+                showToast("설정이 저장되었습니다.", "success");
+            };
+
+            const saveLogs = (newLogs) => {
+                const bounded = newLogs.slice(0, 500);
+                setLogs(bounded);
+                scheduleCloudSave({ logs: bounded });
+            };
+
+            const addLog = (action, detail) => {
+                const newLog = {
+                    id: generateId(),
+                    action,
+                    detail,
+                    at: new Date().toISOString()
+                };
+                setLogs((prev) => {
+                    const bounded = [newLog, ...prev].slice(0, 500);
+                    scheduleCloudSave({ logs: bounded });
+                    return bounded;
+                });
+            };
+
+            const saveBackups = (newBackups) => {
+                const bounded = newBackups.slice(0, 7);
+                setBackups(bounded);
+                scheduleCloudSave({ backups: bounded });
+            };
+
+            const applyImportedData = (data) => {
+                const payload = normalizePayload(data, buildPayload());
+                setUsers(payload.users);
+                setExemptions(payload.exemptions);
+                setDepartments(payload.departments);
+                setJobTitles(payload.jobTitles);
+                setAvailableYears(payload.availableYears);
+                setLogs(payload.logs);
+                setBackups(payload.backups);
+                scheduleCloudSave(payload);
+            };
+
+            const buildSnapshot = (label) => ({
+                id: generateId(),
+                label,
+                createdAt: new Date().toISOString(),
+                data: {
+                    users,
+                    exemptions,
+                    departments,
+                    jobTitles,
+                    availableYears
+                }
+            });
+
+            const createBackupSnapshot = (label = '수동 백업') => {
+                const snapshot = buildSnapshot(label);
+                saveBackups([snapshot, ...backups]);
+                addLog('BACKUP_CREATE', label + ' 생성');
+                return snapshot;
+            };
+
+            const handleExportBackup = () => {
+                const snapshot = createBackupSnapshot('내보내기 백업');
+                const payload = {
+                    version: '1.1.0',
+                    exportedAt: new Date().toISOString(),
+                    ...snapshot.data,
+                    logs
+                };
+                const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+                a.href = url;
+                a.download = 'sec-app-backup-' + stamp + '.json';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                showToast('백업 파일이 다운로드되었습니다.');
+            };
+
+            const handleImportBackup = (e) => {
+                const file = e.target.files && e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    try {
+                        const data = JSON.parse(ev.target.result);
+                        const requiredArrayKeys = ['users', 'exemptions', 'departments', 'jobTitles', 'availableYears'];
+                        const invalid = requiredArrayKeys.some((k) => !Array.isArray(data[k]));
+                        if (invalid) {
+                            showToast('백업 파일 형식이 올바르지 않습니다.', 'error');
+                            return;
+                        }
+                        applyImportedData(data);
+                        if (Array.isArray(data.logs)) {
+                            saveLogs(data.logs);
+                        }
+                        addLog('BACKUP_IMPORT', file.name + ' 복원');
+                        showToast('백업 복원이 완료되었습니다.');
+                    } catch (err) {
+                        console.error(err);
+                        showToast('백업 복원 중 오류가 발생했습니다.', 'error');
+                    }
+                };
+                reader.readAsText(file);
+                e.target.value = '';
+            };
+
+            const restoreSnapshot = (snapshotId) => {
+                const snapshot = backups.find(b => b.id === snapshotId);
+                if (!snapshot) return;
+                if (!confirm('선택한 스냅샷으로 데이터를 복원하시겠습니까?')) return;
+                applyImportedData(snapshot.data);
+                addLog('BACKUP_RESTORE', snapshot.label + ' 복원');
+                showToast('스냅샷 복원이 완료되었습니다.');
+            };
+
+            const getDaysToDate = (dateStr) => {
+                if (!dateStr) return null;
+                const today = new Date(getTodayString());
+                const target = new Date(dateStr);
+                return Math.floor((target - today) / (1000 * 60 * 60 * 24));
+            };
+
+            const getExpiryBuckets = () => {
+                const result = { d7: 0, d3: 0, dday: 0, expired: 0 };
+                exemptions.forEach((e) => {
+                    if (e.isPermanent || !e.endDate) return;
+                    const diff = getDaysToDate(e.endDate);
+                    if (diff === null) return;
+                    if (diff < 0) result.expired += 1;
+                    else if (diff === 0) result.dday += 1;
+                    else if (diff <= 3) result.d3 += 1;
+                    else if (diff <= 7) result.d7 += 1;
+                });
+                return result;
+            };
+
+            const getQualitySummary = () => {
+                const missingRequired = exemptions.filter(e => !e.userId || !e.userName || !e.startDate || (!e.isPermanent && !e.endDate) || !e.reason || !e.docNumber).length;
+                const invalidPeriod = exemptions.filter(e => !e.isPermanent && e.endDate && e.endDate < e.startDate).length;
+                const overlapIds = new Set();
+                const byUser = {};
+                exemptions.forEach(e => {
+                    if (!e.userId || !e.startDate) return;
+                    if (!byUser[e.userId]) byUser[e.userId] = [];
+                    byUser[e.userId].push(e);
+                });
+                Object.values(byUser).forEach((arr) => {
+                    for (let i = 0; i < arr.length; i += 1) {
+                        for (let j = i + 1; j < arr.length; j += 1) {
+                            const a = arr[i];
+                            const b = arr[j];
+                            const aEnd = a.isPermanent ? '9999-12-31' : (a.endDate || '0000-00-00');
+                            const bEnd = b.isPermanent ? '9999-12-31' : (b.endDate || '0000-00-00');
+                            if (a.startDate <= bEnd && b.startDate <= aEnd) {
+                                overlapIds.add(a.id);
+                                overlapIds.add(b.id);
+                            }
+                        }
+                    }
+                });
+                return {
+                    missingRequired,
+                    invalidPeriod,
+                    overlap: overlapIds.size,
+                    totalIssues: missingRequired + invalidPeriod + overlapIds.size
+                };
+            };
+
+            // Handlers
+            const extractByLabel = (text, label) => {
+                const m = text.match(new RegExp(label + '\\s*[:：]?\\s*([^\\n]+)'));
+                return m ? m[1].trim() : '';
+            };
+
+            const normalizeOrgText = (value) => {
+                return (value || '')
+                    .toString()
+                    .replace(/^YJTC[_-]?/i, '')
+                    .replace(/\(.*?\)/g, '')
+                    .replace(/[^0-9a-zA-Z가-힣]/g, '')
+                    .toLowerCase()
+                    .trim();
+            };
+
+            const makeBigrams = (s) => {
+                if (!s || s.length < 2) return s ? [s] : [];
+                const arr = [];
+                for (let i = 0; i < s.length - 1; i += 1) arr.push(s.slice(i, i + 2));
+                return arr;
+            };
+
+            const getSimilarityScore = (a, b) => {
+                const x = normalizeOrgText(a);
+                const y = normalizeOrgText(b);
+                if (!x || !y) return 0;
+                if (x === y) return 1;
+                if (x.includes(y) || y.includes(x)) return 0.9;
+
+                const bgA = makeBigrams(x);
+                const bgB = makeBigrams(y);
+                const map = new Map();
+                bgA.forEach((k) => map.set(k, (map.get(k) || 0) + 1));
+                let overlap = 0;
+                bgB.forEach((k) => {
+                    const n = map.get(k) || 0;
+                    if (n > 0) {
+                        overlap += 1;
+                        map.set(k, n - 1);
+                    }
+                });
+                return (2 * overlap) / (bgA.length + bgB.length);
+            };
+
+            const findBestFuzzyMatch = (raw, candidates, minScore = 0.45) => {
+                if (!raw || !Array.isArray(candidates) || candidates.length === 0) return null;
+
+                // Business rule: if source includes YJTC, force-map to YJ Tech Campus when available.
+                if (/YJTC/i.test(raw)) {
+                    const preferred = candidates.find((c) => {
+                        const n = normalizeOrgText(c);
+                        return n === 'yjtechcampus' || /yj\s*tech\s*campus/i.test(c);
+                    });
+                    if (preferred) return { value: preferred, score: 1 };
+                }
+
+                let best = null;
+                let bestScore = 0;
+                candidates.forEach((candidate) => {
+                    const score = getSimilarityScore(raw, candidate);
+                    if (score > bestScore) {
+                        bestScore = score;
+                        best = candidate;
+                    }
+                });
+                if (!best || bestScore < minScore) return null;
+                return { value: best, score: bestScore };
+            };
+
+            const parseApprovalPdfText = (rawText) => {
+                const text = rawText.replace(/\u00a0/g, ' ').replace(/\r/g, '');
+                const lines = text
+                    .split('\n')
+                    .map((line) => line.replace(/\s+/g, ' ').trim())
+                    .filter(Boolean);
+                const normalized = lines.join(' ');
+
+                const stripByKeywords = (value) => {
+                    return (value || '')
+                        .replace(/\s*(신청기간|신청사유|비고|소속|직위|문서번호|작성일자|신청부서).*/, '')
+                        .trim();
+                };
+
+                const getLabeledValueFrom = (srcLines, labels) => {
+                    for (let i = 0; i < srcLines.length; i += 1) {
+                        const line = srcLines[i];
+                        for (const label of labels) {
+                            if (!line.includes(label)) continue;
+                            const after = line.split(label).slice(1).join(label).replace(/^\s*[:：-]?\s*/, '').trim();
+                            if (after) return stripByKeywords(after);
+                            if (srcLines[i + 1]) return stripByKeywords(srcLines[i + 1].trim());
+                        }
+                    }
+                    return '';
+                };
+
+                const toName = (value) => {
+                    if (!value) return '';
+                    const compact = value.replace(/[^가-힣 ]/g, ' ').replace(/\s+/g, ' ').trim();
+                    const firstToken = compact.split(' ')[0] || '';
+                    const m = firstToken.match(/[가-힣]{2,4}/);
+                    return m ? m[0] : '';
+                };
+
+                const sectionStart = lines.findIndex((line) => /신청\s*내용/.test(line));
+                const sectionLines = sectionStart >= 0 ? lines.slice(sectionStart, sectionStart + 60) : lines;
+                const sectionNormalized = sectionLines.join(' ');
+
+                const extractDocNumber = () => {
+                    const docPattern = /([A-Za-z가-힣0-9_]{2,30}-[0-9]{4}-[0-9]{2,6})/;
+                    const docHeadPattern = /([A-Za-z가-힣0-9_]{2,30}-[0-9]{4}-)([0-9]{0,6})/;
+                    const takeShortDigits = (line) => {
+                        const t = (line || '').trim();
+                        if (!t) return '';
+                        const exact = t.match(/^(\d{1,3})$/);
+                        if (exact) return exact[1];
+                        const lead = t.match(/^(\d{1,3})(?!\d)/);
+                        if (lead && t.length <= 10) return lead[1];
+                        return '';
+                    };
+
+                    for (let i = 0; i < lines.length; i += 1) {
+                        if (!/문서번호/.test(lines[i])) continue;
+
+                        const windowLines = [lines[i - 1] || '', lines[i] || '', lines[i + 1] || '', lines[i + 2] || '', lines[i + 3] || ''];
+                        const chunk = windowLines.join(' ');
+                        const compact = chunk.replace(/\s+/g, '');
+
+                        const cont = [lines[i + 1], lines[i + 2], lines[i + 3]].map(takeShortDigits).join('');
+
+                        const full = compact.match(docPattern);
+                        if (full) {
+                            let doc = full[1];
+                            const serial = (doc.match(/-(\d{1,6})$/) || [])[1] || '';
+                            if (serial.length <= 4 && cont && !serial.endsWith(cont.slice(0, Math.min(3, cont.length)))) {
+                                doc = doc.replace(/-(\d{1,6})$/, (_, s) => '-' + (s + cont).slice(0, 6));
+                            }
+                            return doc;
+                        }
+
+                        const head = compact.match(docHeadPattern);
+                        if (head) {
+                            const prefix = head[1];
+                            let serial = head[2] || '';
+                            if (serial.length < 6 && cont) serial = (serial + cont).slice(0, 6);
+                            if (serial.length >= 2) return prefix + serial;
+                        }
+                    }
+
+                    const fallback = normalized.replace(/\s+/g, '').match(docPattern);
+                    return fallback ? fallback[1] : '';
+                };
+
+                const docNumber = extractDocNumber();
+
+                let userName = '';
+                const nameLine = sectionLines.find((line) => /성함/.test(line));
+                if (nameLine) {
+                    const n = nameLine.match(/성함\s*[:：-]?\s*([가-힣]{2,4})(?=\s*(신청기간|신청사유|비고|$))/);
+                    if (n) userName = n[1];
+                }
+                if (!userName) userName = toName(getLabeledValueFrom(sectionLines, ['성함', '신청자']));
+                if (!userName) userName = toName(getLabeledValueFrom(lines, ['신청자', '성함']));
+                if (!userName) {
+                    const nameMatch = sectionNormalized.match(/(?:성함|신청자)\s*[:：-]?\s*([가-힣\s]{2,10})/);
+                    userName = nameMatch ? toName(nameMatch[1]) : '';
+                }
+
+                const deptRaw = getLabeledValueFrom(sectionLines, ['신청부서', '소속']) || getLabeledValueFrom(lines, ['신청부서', '소속']);
+                const dept = deptRaw.trim();
+                const jobTitle = getLabeledValueFrom(sectionLines, ['직위']) || getLabeledValueFrom(lines, ['직위']);
+
+                const periodMatch = sectionNormalized.match(/신청기간\s*([0-9]{4}-[0-9]{2}-[0-9]{2}).*?~\s*([0-9]{4}-[0-9]{2}-[0-9]{2})/)
+                    || normalized.match(/신청기간\s*([0-9]{4}-[0-9]{2}-[0-9]{2}).*?~\s*([0-9]{4}-[0-9]{2}-[0-9]{2})/);
+                const startDate = periodMatch ? periodMatch[1] : '';
+                const endDate = periodMatch ? periodMatch[2] : '';
+
+                const extractSection = (src, startLabel, stopLabels) => {
+                    const startIdx = src.indexOf(startLabel);
+                    if (startIdx < 0) return '';
+                    const fromStart = src.slice(startIdx + startLabel.length).trim();
+                    let endIdx = fromStart.length;
+                    stopLabels.forEach((label) => {
+                        const i = fromStart.indexOf(label);
+                        if (i >= 0 && i < endIdx) endIdx = i;
+                    });
+                    return fromStart.slice(0, endIdx).trim();
+                };
+
+                let reason = extractSection(sectionNormalized, '신청사유', [' 비고', ' 신청기간', ' 문서번호', ' 신청자', ' 성함', ' 소속', ' 직위']);
+                if (!reason) reason = extractSection(normalized, '신청사유', [' 비고', ' 신청기간', ' 문서번호', ' 신청자', ' 성함', ' 소속', ' 직위']);
+                reason = reason.replace(/^[:：\-]+\s*/, '').replace(/\s+/g, ' ').trim();
+                if (/보안해제\s*신청\s*유의사항/.test(reason)) reason = '';
+                if (reason.length > 180) reason = reason.slice(0, 180).trim();
+
+                const approved = /승\s*인/.test(normalized) && !/반려|취소|회수/.test(normalized);
+
+                return { docNumber, userName, dept, jobTitle, startDate, endDate, reason, approved };
+            };
+
+            const handlePdfUpload = async (e) => {
+                const file = e.target.files && e.target.files[0];
+                if (!file) return;
+
+                if (!window.pdfjsLib) {
+                    showToast('PDF 파서 로드에 실패했습니다. 새로고침 후 다시 시도해주세요.', 'error');
+                    return;
+                }
+
+                try {
+                    setIsPdfParsing(true);
+                    setUploadedPdfName(file.name);
+                    setPdfApprovalStatus(null);
+
+                    window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+                    const data = new Uint8Array(await file.arrayBuffer());
+                    const pdf = await window.pdfjsLib.getDocument({ data }).promise;
+
+                    let fullText = '';
+                    for (let i = 1; i <= pdf.numPages; i += 1) {
+                        const page = await pdf.getPage(i);
+                        const content = await page.getTextContent();
+                        const sorted = content.items.slice().sort((a, b) => {
+                            const dy = b.transform[5] - a.transform[5];
+                            if (Math.abs(dy) > 2) return dy;
+                            return a.transform[4] - b.transform[4];
+                        });
+
+                        const pageLines = [];
+                        let currentY = null;
+                        let lineParts = [];
+                        sorted.forEach((item) => {
+                            const str = (item.str || '').trim();
+                            if (!str) return;
+                            const y = item.transform[5];
+                            if (currentY === null || Math.abs(y - currentY) <= 2) {
+                                lineParts.push(str);
+                            } else {
+                                pageLines.push(lineParts.join(' '));
+                                lineParts = [str];
+                            }
+                            currentY = y;
+                        });
+                        if (lineParts.length) pageLines.push(lineParts.join(' '));
+                        fullText += pageLines.join('\n') + '\n';
+                    }
+
+                    const parsed = parseApprovalPdfText(fullText);
+                    const form = exemptFormRef.current;
+                    if (form) {
+                        if (parsed.docNumber) form.docNumber.value = parsed.docNumber;
+                        if (parsed.reason) form.reason.value = parsed.reason;
+                        if (parsed.startDate) form.startDate.value = parsed.startDate;
+                        if (parsed.endDate) form.endDate.value = parsed.endDate;
+                        if (parsed.userName) form.newUserName.value = parsed.userName;
+
+                        if (parsed.dept) {
+                            const deptMatch = findBestFuzzyMatch(parsed.dept, departments, 0.4);
+                            if (deptMatch) form.newUserDept.value = deptMatch.value;
+                        }
+                        if (parsed.jobTitle) {
+                            const titleMatch = findBestFuzzyMatch(parsed.jobTitle, jobTitles, 0.5);
+                            if (titleMatch) form.newUserTitle.value = titleMatch.value;
+                        }
+
+                    }
+
+                    setPdfApprovalStatus(parsed.approved ? 'approved' : 'not-approved');
+                    if (parsed.approved) {
+                        showToast('승인 PDF를 확인하고 신청 정보를 자동 입력했습니다.');
+                    } else {
+                        showToast('PDF는 읽었지만 승인 상태를 확인하지 못했습니다. 값 검토 후 진행해주세요.', 'error');
+                    }
+                } catch (err) {
+                    console.error(err);
+                    setPdfApprovalStatus('parse-failed');
+                    showToast('PDF 분석 중 오류가 발생했습니다.', 'error');
+                } finally {
+                    setIsPdfParsing(false);
+                    e.target.value = '';
+                }
+            };
+
+            const handleAddExemption = (e) => {
+                e.preventDefault();
+                const formData = new FormData(e.target);
+                const startDate = formData.get('startDate');
+                const endDate = formData.get('endDate');
+                const reason = (formData.get('reason') || '').trim();
+                const docNumber = (formData.get('docNumber') || '').trim();
+
+                if (uploadedPdfName && pdfApprovalStatus !== 'approved') {
+                    showToast('승인 상태가 확인된 PDF만 자동등록할 수 있습니다.', 'error');
+                    return;
+                }
+
+                if (!isPermanentFormValue) {
+                    if (!endDate) { showToast('종료일을 입력해주세요.', 'error'); return; }
+                    if (endDate < startDate) { showToast('종료일은 시작일보다 빠를 수 없습니다.', 'error'); return; }
+                }
+
+                if (!reason) { showToast('신청 사유를 입력해주세요.', 'error'); return; }
+                if (!docNumber) { showToast('전자결재 문서 번호를 입력해주세요.', 'error'); return; }
+
+                const newName = (formData.get('newUserName') || '').trim();
+                const newDept = (formData.get('newUserDept') || '').trim();
+                const newTitle = (formData.get('newUserTitle') || '').trim();
+
+                if (!newName) { showToast('이름을 입력해주세요.', 'error'); return; }
+
+                const normalizedName = newName.replace(/\s+/g, '');
+                const existingUser = users.find((u) => {
+                    const sameName = (u.name || '').replace(/\s+/g, '') === normalizedName;
+                    const sameDept = !newDept || u.dept === newDept;
+                    const sameTitle = !newTitle || u.jobTitle === newTitle;
+                    return sameName && sameDept && sameTitle;
+                });
+
+                let targetUserId = '';
+                let targetUserName = '';
+                let targetUserDept = '';
+
+                if (existingUser) {
+                    targetUserId = existingUser.id;
+                    targetUserName = existingUser.name;
+                    targetUserDept = existingUser.dept;
+                } else {
+                    const newUser = {
+                        id: generateId(),
+                        name: newName,
+                        dept: newDept || departments[0] || '',
+                        jobTitle: newTitle || jobTitles[0] || '',
+                        created: new Date().toISOString()
+                    };
+                    const updatedUsers = [...users, newUser];
+                    saveUsers(updatedUsers);
+                    targetUserId = newUser.id;
+                    targetUserName = newUser.name;
+                    targetUserDept = newUser.dept;
+                    addLog('USER_CREATE', newUser.name + ' (' + newUser.dept + ') 자동 등록');
+                }
+
+                const newExemption = {
+                    id: generateId(),
+                    userId: targetUserId,
+                    userName: targetUserName,
+                    userDept: targetUserDept,
+                    startDate,
+                    endDate: isPermanentFormValue ? null : endDate,
+                    isPermanent: isPermanentFormValue,
+                    reason,
+                    docNumber,
+                    status: 'Active'
+                };
+                saveExemptions([...exemptions, newExemption]);
+                addLog('EXEMPTION_CREATE', newExemption.userName + ' 예외 등록 (' + (newExemption.isPermanent ? '항시' : (newExemption.startDate + '~' + newExemption.endDate)) + ')');
+                setIsExemptModalOpen(false);
+                setTimeout(() => {
+                    setIsPermanentFormValue(false);
+                    setIsPdfParsing(false);
+                    setPdfApprovalStatus(null);
+                    setUploadedPdfName('');
+                }, 300);
+                showToast('등록이 완료되었습니다.');
+            };
+
+            const deleteExemption = (id) => {
+                if(confirm("정말 삭제하시겠습니까?")) {
+                    const target = exemptions.find(e => e.id === id);
+                    saveExemptions(exemptions.filter(e => e.id !== id));
+                    if (target) addLog('EXEMPTION_DELETE', target.userName + ' 예외 삭제');
+                    showToast("삭제되었습니다.", "error");
+                }
+            };
+
+            const openExemptModal = () => {
+                setIsPermanentFormValue(false);
+                setIsPdfParsing(false);
+                setPdfApprovalStatus(null);
+                setUploadedPdfName('');
+                setIsExemptModalOpen(true);
+            };
+
+            // --- Views ---
+
+            const renderDashboard = () => {
+                const activeCount = exemptions.filter(isExemptionActive).length;
+                const totalUsers = users.length;
+                const permanentCount = exemptions.filter(e => e.isPermanent).length;
+                const todayStr = getTodayString();
+                const [todayYear, todayMonth] = todayStr.split('-').map(Number);
+                const expiringSoon = exemptions.filter(e => {
+                    if (e.isPermanent || !e.endDate) return false;
+                    const [endYear, endMonth] = e.endDate.split('-').map(Number);
+                    if (!endYear || !endMonth) return false;
+                    return endYear === todayYear && endMonth === todayMonth && e.endDate >= todayStr;
+                }).length;
+
+                // Chart Data Calculation
+                const currentYear = new Date().getFullYear();
+                const monthlyCounts = Array.from({length: 12}, (_, i) => {
+                    return exemptions.filter(e => {
+                         const start = new Date(e.startDate);
+                         const end = e.isPermanent ? new Date(currentYear, 11, 31) : new Date(e.endDate);
+                         const monthStart = new Date(currentYear, i, 1);
+                         const monthEnd = new Date(currentYear, i + 1, 0);
+                         return start <= monthEnd && end >= monthStart;
+                    }).length;
+                });
+                
+                const monthLabels = Array.from({length: 12}, (_, i) => `${i + 1}월`);
+
+                return (
+                    <div className="space-y-6 fade-in pb-10">
+                        {/* Summary Cards */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                            <Card className="border-l-4 border-l-brand-600 relative overflow-hidden">
+                                <div className="relative z-10">
+                                    <p className="text-xs font-bold text-slate-500 uppercase mb-1">Total Active</p>
+                                    <h3 className="text-3xl font-extrabold text-slate-800">{activeCount}<span className="text-sm font-normal text-slate-400 ml-1">명</span></h3>
+                                </div>
+                                <i className="fa-solid fa-shield-halved absolute -bottom-2 -right-2 text-6xl text-brand-50 opacity-50"></i>
+                            </Card>
+                            <Card className="border-l-4 border-l-purple-500 relative overflow-hidden">
+                                <div className="relative z-10">
+                                    <p className="text-xs font-bold text-slate-500 uppercase mb-1">Permanent</p>
+                                    <h3 className="text-3xl font-extrabold text-slate-800">{permanentCount}<span className="text-sm font-normal text-slate-400 ml-1">명</span></h3>
+                                </div>
+                                <i className="fa-solid fa-infinity absolute -bottom-2 -right-2 text-6xl text-purple-50 opacity-50"></i>
+                            </Card>
+                            <Card className="border-l-4 border-l-orange-500 relative overflow-hidden">
+                                <div className="relative z-10">
+                                    <p className="text-xs font-bold text-slate-500 uppercase mb-1">Expiring Soon</p>
+                                    <h3 className="text-3xl font-extrabold text-slate-800">{expiringSoon}<span className="text-sm font-normal text-slate-400 ml-1">건</span></h3>
+                                </div>
+                                <i className="fa-solid fa-clock-rotate-left absolute -bottom-2 -right-2 text-6xl text-orange-50 opacity-50"></i>
+                            </Card>
+                            <Card className="border-l-4 border-l-slate-500 relative overflow-hidden">
+                                <div className="relative z-10">
+                                    <p className="text-xs font-bold text-slate-500 uppercase mb-1">Total Users</p>
+                                    <h3 className="text-3xl font-extrabold text-slate-800">{totalUsers}<span className="text-sm font-normal text-slate-400 ml-1">명</span></h3>
+                                </div>
+                                <i className="fa-solid fa-users absolute -bottom-2 -right-2 text-6xl text-slate-50 opacity-50"></i>
+                            </Card>
+                        </div>
+
+                        {(() => {
+                            const buckets = getExpiryBuckets();
+                            return (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                                    <Card className="border-l-4 border-l-yellow-500">
+                                        <p className="text-xs font-bold text-slate-500 uppercase mb-1">D-7</p>
+                                        <h3 className="text-2xl font-extrabold text-slate-800">{buckets.d7}<span className="text-sm font-normal text-slate-400 ml-1">건</span></h3>
+                                    </Card>
+                                    <Card className="border-l-4 border-l-orange-500">
+                                        <p className="text-xs font-bold text-slate-500 uppercase mb-1">D-3</p>
+                                        <h3 className="text-2xl font-extrabold text-slate-800">{buckets.d3}<span className="text-sm font-normal text-slate-400 ml-1">건</span></h3>
+                                    </Card>
+                                    <Card className="border-l-4 border-l-red-500">
+                                        <p className="text-xs font-bold text-slate-500 uppercase mb-1">D-Day</p>
+                                        <h3 className="text-2xl font-extrabold text-slate-800">{buckets.dday}<span className="text-sm font-normal text-slate-400 ml-1">건</span></h3>
+                                    </Card>
+                                    <Card className="border-l-4 border-l-slate-500">
+                                        <p className="text-xs font-bold text-slate-500 uppercase mb-1">Expired</p>
+                                        <h3 className="text-2xl font-extrabold text-slate-800">{buckets.expired}<span className="text-sm font-normal text-slate-400 ml-1">건</span></h3>
+                                    </Card>
+                                </div>
+                            );
+                        })()}
+
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            {/* Trend Chart (Replaces Bar Chart) */}
+                            <Card className="lg:col-span-2 flex flex-col h-80">
+                                <h4 className="font-bold text-slate-700 mb-2 flex items-center gap-2">
+                                    <i className="fa-solid fa-chart-line text-brand-500"></i> {currentYear}년 월별 예외 사용자 추이
+                                </h4>
+                                <div className="flex-1 w-full h-full">
+                                    <TrendChart data={monthlyCounts} labels={monthLabels} />
+                                </div>
+                            </Card>
+
+                            {/* Department Distribution */}
+                            <Card className="h-80 flex flex-col">
+                                <h4 className="font-bold text-slate-700 mb-4 flex items-center gap-2">
+                                    <i className="fa-solid fa-chart-pie text-slate-400"></i> 부서별 점유율
+                                </h4>
+                                <div className="flex-1 overflow-y-auto pr-1 custom-scrollbar">
+                                    <div className="space-y-4">
+                                        {departments.map(dept => {
+                                            const count = exemptions.filter(e => e.userDept === dept && isExemptionActive(e)).length;
+                                            const percentage = activeCount > 0 ? Math.round((count / activeCount) * 100) : 0;
+                                            if (activeCount > 0 && count === 0) return null; 
+                                            return (
+                                                <div key={dept}>
+                                                    <div className="flex justify-between text-sm mb-1">
+                                                        <span className="text-slate-600 font-medium">{dept}</span>
+                                                        <span className="text-slate-400 font-bold">{count}명 ({percentage}%)</span>
+                                                    </div>
+                                                    <div className="w-full bg-slate-100 rounded-full h-2.5">
+                                                        <div className="bg-brand-500 h-2.5 rounded-full transition-all duration-500" style={{ width: `${percentage}%` }}></div>
+                                                    </div>
+                                                </div>
+                                            )
+                                        })}
+                                        {activeCount === 0 && <p className="text-center text-slate-400 mt-10">활성 데이터가 없습니다.</p>}
+                                    </div>
+                                </div>
+                            </Card>
+                        </div>
+
+                        {/* Lists Row */}
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            {/* Recent Activity */}
+                            <Card className="h-96 flex flex-col">
+                                <h4 className="font-bold text-slate-700 mb-4 flex items-center gap-2 border-b pb-2">
+                                    <i className="fa-solid fa-clock-rotate-left text-slate-400"></i> 최근 신청 내역
+                                </h4>
+                                <div className="flex-1 overflow-y-auto">
+                                    <ul className="divide-y divide-slate-100">
+                                        {[...exemptions].reverse().slice(0, 10).map(ex => (
+                                            <li key={ex.id} className="py-3 flex justify-between items-center group hover:bg-slate-50 px-2 rounded transition-colors">
+                                                <div>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="font-bold text-slate-700">{ex.userName}</span>
+                                                        <span className="text-xs text-slate-400 bg-slate-100 px-1.5 rounded">{ex.userDept}</span>
+                                                        {ex.isPermanent && <span className="text-[10px] bg-purple-100 text-purple-600 px-1 rounded font-bold">항시</span>}
+                                                    </div>
+                                                    <p className="text-xs text-slate-500 mt-0.5 truncate max-w-[200px]">{ex.reason}</p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <span className={`text-xs font-bold ${isExemptionActive(ex) ? 'text-green-600' : 'text-slate-400'}`}>
+                                                        {isExemptionActive(ex) ? 'Active' : 'Expired'}
+                                                    </span>
+                                                    <p className="text-[10px] text-slate-400">{formatDate(ex.startDate)}</p>
+                                                </div>
+                                            </li>
+                                        ))}
+                                        {exemptions.length === 0 && <li className="text-center text-slate-400 py-10">데이터 없음</li>}
+                                    </ul>
+                                </div>
+                            </Card>
+
+                            {/* Permanent Users List */}
+                            <Card className="h-96 flex flex-col border-t-4 border-t-purple-500">
+                                <h4 className="font-bold text-purple-900 mb-4 flex items-center gap-2 border-b border-purple-100 pb-2">
+                                    <i className="fa-solid fa-infinity text-purple-500"></i> 항시 예외 사용자 목록
+                                </h4>
+                                <div className="flex-1 overflow-y-auto bg-purple-50/30 rounded p-2">
+                                    <table className="w-full text-sm text-left">
+                                        <thead>
+                                            <tr className="text-xs text-purple-800 uppercase border-b border-purple-100">
+                                                <th className="py-2 pl-2">이름</th>
+                                                <th className="py-2">부서</th>
+                                                <th className="py-2 text-right pr-2">시작일</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-purple-100/50">
+                                            {exemptions.filter(e => e.isPermanent).map(ex => (
+                                                <tr key={ex.id} className="hover:bg-purple-50 transition-colors">
+                                                    <td className="py-2 pl-2 font-medium text-slate-700">{ex.userName}</td>
+                                                    <td className="py-2 text-slate-500 text-xs">{ex.userDept}</td>
+                                                    <td className="py-2 text-right pr-2 text-slate-500 text-xs">{formatDate(ex.startDate)}</td>
+                                                </tr>
+                                            ))}
+                                            {exemptions.filter(e => e.isPermanent).length === 0 && (
+                                                <tr><td colSpan="3" className="text-center py-10 text-slate-400 text-xs">항시 예외 사용자가 없습니다.</td></tr>
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </Card>
+                        </div>
+                    </div>
+                );
+            };
+
+            const renderGantt = () => {
+                const today = new Date();
+                
+                return (
+                    <Card className="overflow-hidden fade-in">
+                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+                            <div>
+                                <h3 className="font-bold text-lg">일정 관리 (Gantt View)</h3>
+                                <p className="text-xs text-slate-500 mt-1">예외 신청 현황을 시각적으로 확인합니다.</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <div className="relative">
+                                    <select 
+                                        value={selectedYear}
+                                        onChange={(e) => setSelectedYear(Number(e.target.value))}
+                                        className="appearance-none bg-white border border-slate-300 text-slate-700 py-1.5 pl-3 pr-8 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 cursor-pointer font-bold"
+                                    >
+                                        {availableYears.map(year => (
+                                            <option key={year} value={year}>{year}년</option>
+                                        ))}
+                                    </select>
+                                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
+                                        <i className="fa-solid fa-chevron-down text-xs"></i>
+                                    </div>
+                                </div>
+
+                                <div className="flex bg-slate-100 p-1 rounded-lg">
+                                    <button onClick={() => setGanttMode('month')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${ganttMode === 'month' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>월간</button>
+                                    <button onClick={() => setGanttMode('year')} className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all ${ganttMode === 'year' ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>연간</button>
+                                </div>
+                            </div>
+                        </div>
+                        {ganttMode === 'month' ? ( <MonthGantt year={selectedYear} initialMonth={today.getMonth()} exemptions={exemptions} /> ) : ( <YearGantt year={selectedYear} exemptions={exemptions} /> )}
+                    </Card>
+                );
+            };
+
+            const renderList = () => (
+                <Card className="fade-in">
+                    <div className="flex justify-between items-center mb-6">
+                        <h3 className="font-bold text-lg">전체 예외 목록</h3>
+                        <Button onClick={openExemptModal} variant="primary">
+                            <i className="fa-solid fa-plus"></i> 예외 등록
+                        </Button>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm text-left text-slate-600">
+                            <thead className="text-xs text-slate-700 uppercase bg-slate-50">
+                                <tr>
+                                    <th className="px-6 py-3">신청자</th>
+                                    <th className="px-6 py-3">부서/직급</th>
+                                    <th className="px-6 py-3">기간</th>
+                                    <th className="px-6 py-3">사유 (결재번호)</th>
+                                    <th className="px-6 py-3">상태</th>
+                                    <th className="px-6 py-3 text-right">관리</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {exemptions.length === 0 ? (
+                                    <tr><td colSpan="6" className="text-center py-8 text-slate-400">등록된 예외 내역이 없습니다.</td></tr>
+                                ) : (
+                                    exemptions.map(ex => {
+                                        const active = isExemptionActive(ex);
+                                        return (
+                                            <tr key={ex.id} className="bg-white border-b hover:bg-slate-50">
+                                                <td className="px-6 py-4 font-medium text-slate-900">{ex.userName}</td>
+                                                <td className="px-6 py-4">{ex.userDept}</td>
+                                                <td className="px-6 py-4">
+                                                    {formatDate(ex.startDate)} ~ {ex.isPermanent ? <span className="text-purple-600 font-bold">항시</span> : formatDate(ex.endDate)}
+                                                    <div className="text-xs text-slate-400 mt-1">{getDaysDiff(ex.startDate, ex.endDate, ex.isPermanent)}</div>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <div className="font-medium">{ex.reason}</div>
+                                                    <div className="text-xs text-slate-400">#{ex.docNumber || 'N/A'}</div>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <Badge color={active ? 'green' : 'gray'}>
+                                                        {active ? '적용중' : '만료됨'}
+                                                    </Badge>
+                                                </td>
+                                                <td className="px-6 py-4 text-right">
+                                                    <button onClick={() => deleteExemption(ex.id)} className="text-slate-400 hover:text-red-600 transition-colors">
+                                                        <i className="fa-solid fa-trash-can"></i>
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        )
+                                    })
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </Card>
+            );
+            
+            const renderSettings = () => (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 fade-in">
+                    <Card>
+                        <h3 className="font-bold text-lg mb-4">조직도 (부서) 관리</h3>
+                        <div className="flex gap-2 mb-4">
+                            <input type="text" id="newDept" placeholder="부서명 입력" className="flex-1 border border-slate-300 rounded px-3 py-2 text-sm focus:outline-brand-500" />
+                            <Button onClick={() => {
+                                const input = document.getElementById('newDept');
+                                const val = input.value.trim();
+                                if (!val) { showToast("부서명을 입력해주세요.", "error"); return; }
+                                if (departments.includes(val)) { showToast("이미 등록된 부서입니다.", "error"); return; }
+                                saveSettings([...departments, val], jobTitles, availableYears);
+                                input.value = '';
+                            }} variant="secondary">추가</Button>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            {departments.map((d, i) => (
+                                <span key={i} className="bg-slate-100 text-slate-700 px-3 py-1 rounded text-sm flex items-center gap-2 group">
+                                    {d}
+                                    <button onClick={() => saveSettings(departments.filter(x => x !== d), jobTitles, availableYears)} className="text-slate-400 hover:text-red-500">
+                                        <i className="fa-solid fa-xmark"></i>
+                                    </button>
+                                </span>
+                            ))}
+                        </div>
+                    </Card>
+                    <Card>
+                        <h3 className="font-bold text-lg mb-4">직급 관리</h3>
+                        <div className="flex gap-2 mb-4">
+                            <input type="text" id="newTitle" placeholder="직급명 입력" className="flex-1 border border-slate-300 rounded px-3 py-2 text-sm focus:outline-brand-500" />
+                            <Button onClick={() => {
+                                const input = document.getElementById('newTitle');
+                                const val = input.value.trim();
+                                if (!val) { showToast("직급명을 입력해주세요.", "error"); return; }
+                                if (jobTitles.includes(val)) { showToast("이미 등록된 직급입니다.", "error"); return; }
+                                saveSettings(departments, [...jobTitles, val], availableYears);
+                                input.value = '';
+                            }} variant="secondary">추가</Button>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            {jobTitles.map((t, i) => (
+                                <span key={i} className="bg-slate-100 text-slate-700 px-3 py-1 rounded text-sm flex items-center gap-2">
+                                    {t}
+                                    <button onClick={() => saveSettings(departments, jobTitles.filter(x => x !== t), availableYears)} className="text-slate-400 hover:text-red-500">
+                                        <i className="fa-solid fa-xmark"></i>
+                                    </button>
+                                </span>
+                            ))}
+                        </div>
+                    </Card>
+                    <Card>
+                        <h3 className="font-bold text-lg mb-4">연도 관리 (Gantt)</h3>
+                        <div className="flex gap-2 mb-4">
+                            <input type="number" id="newYear" placeholder="연도 (예: 2026)" className="flex-1 border border-slate-300 rounded px-3 py-2 text-sm focus:outline-brand-500" />
+                            <Button onClick={() => {
+                                const input = document.getElementById('newYear');
+                                const val = input.value.trim();
+                                if (!val) { showToast("연도를 입력해주세요.", "error"); return; }
+                                if (!/^\d{4}$/.test(val)) { showToast("연도는 4자리 숫자로 입력해주세요.", "error"); return; }
+                                if (availableYears.includes(val)) {
+                                    showToast("이미 등록된 연도입니다.", "error");
+                                    return;
+                                }
+                                const newYears = [...availableYears, val].sort((a, b) => Number(a) - Number(b));
+                                saveSettings(departments, jobTitles, newYears);
+                                input.value = '';
+                            }} variant="secondary">추가</Button>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            {availableYears.map((y, i) => (
+                                <span key={i} className="bg-slate-100 text-slate-700 px-3 py-1 rounded text-sm flex items-center gap-2">
+                                    {y}년
+                                    <button onClick={() => saveSettings(departments, jobTitles, availableYears.filter(x => x !== y))} className="text-slate-400 hover:text-red-500">
+                                        <i className="fa-solid fa-xmark"></i>
+                                    </button>
+                                </span>
+                            ))}
+                        </div>
+                    </Card>
+                    
+                    <Card className="md:col-span-2">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="font-bold text-lg">백업 / 복원</h3>
+                            <div className="flex gap-2">
+                                <Button onClick={() => createBackupSnapshot('수동 백업')} variant="secondary">
+                                    <i className="fa-solid fa-database"></i> 스냅샷 생성
+                                </Button>
+                                <Button onClick={handleExportBackup} variant="primary">
+                                    <i className="fa-solid fa-download"></i> JSON 내보내기
+                                </Button>
+                                <Button onClick={() => document.getElementById('backupFileInput').click()} variant="secondary">
+                                    <i className="fa-solid fa-upload"></i> JSON 가져오기
+                                </Button>
+                                <input id="backupFileInput" type="file" accept="application/json" className="hidden" onChange={handleImportBackup} />
+                            </div>
+                        </div>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                                <thead>
+                                    <tr className="text-left text-slate-500 border-b border-slate-200">
+                                        <th className="py-2">생성일시</th>
+                                        <th className="py-2">라벨</th>
+                                        <th className="py-2 text-right">복원</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {backups.map(b => (
+                                        <tr key={b.id} className="border-b border-slate-100">
+                                            <td className="py-2 text-slate-600">{new Date(b.createdAt).toLocaleString('ko-KR')}</td>
+                                            <td className="py-2 font-medium text-slate-700">{b.label}</td>
+                                            <td className="py-2 text-right">
+                                                <Button onClick={() => restoreSnapshot(b.id)} variant="ghost" className="text-xs">
+                                                    <i className="fa-solid fa-rotate-left"></i> 복원
+                                                </Button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                            {backups.length === 0 && <p className="text-center text-slate-400 py-6">생성된 스냅샷이 없습니다.</p>}
+                        </div>
+                    </Card>
+
+                    <Card>
+                        <h3 className="font-bold text-lg mb-4">데이터 품질 점검</h3>
+                        {(() => {
+                            const quality = getQualitySummary();
+                            return (
+                                <div className="space-y-3">
+                                    <div className="flex justify-between"><span className="text-slate-600">필수값 누락</span><Badge color={quality.missingRequired ? 'red' : 'green'}>{quality.missingRequired}건</Badge></div>
+                                    <div className="flex justify-between"><span className="text-slate-600">기간 오류(종료&lt;시작)</span><Badge color={quality.invalidPeriod ? 'red' : 'green'}>{quality.invalidPeriod}건</Badge></div>
+                                    <div className="flex justify-between"><span className="text-slate-600">중복/겹침 예외</span><Badge color={quality.overlap ? 'yellow' : 'green'}>{quality.overlap}건</Badge></div>
+                                    <div className="pt-2 border-t border-slate-100 flex justify-between font-bold"><span>총 이슈</span><span className={quality.totalIssues ? 'text-red-600' : 'text-green-600'}>{quality.totalIssues}건</span></div>
+                                </div>
+                            );
+                        })()}
+                    </Card>
+
+                    <Card>
+                        <h3 className="font-bold text-lg mb-4">최근 변경 이력</h3>
+                        <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                            {logs.slice(0, 20).map(log => (
+                                <div key={log.id} className="text-xs border border-slate-200 rounded p-2 bg-slate-50">
+                                    <div className="font-bold text-slate-700">{log.action}</div>
+                                    <div className="text-slate-500 mt-1">{log.detail}</div>
+                                    <div className="text-slate-400 mt-1">{new Date(log.at).toLocaleString('ko-KR')}</div>
+                                </div>
+                            ))}
+                            {logs.length === 0 && <p className="text-center text-slate-400 py-6">변경 이력이 없습니다.</p>}
+                        </div>
+                    </Card>
+                </div>
+            );
+
+            return (
+                <div className="min-h-screen font-sans flex text-slate-800">
+                    <aside className="w-64 bg-slate-900 text-slate-300 flex-shrink-0 hidden md:flex flex-col">
+                        <div className="p-6">
+                            <h1 className="text-white text-xl font-bold flex items-center gap-2">
+                                <i className="fa-solid fa-shield-halved text-brand-500"></i>
+                                SecurityOps
+                            </h1>
+                            <p className="text-xs text-slate-500 mt-1">캡처 예외 관리 시스템</p>
+                        </div>
+                        <nav className="flex-1 px-3 space-y-1">
+                            {[
+                                { id: 'dashboard', icon: 'fa-table-columns', label: '대시보드' },
+                                { id: 'gantt', icon: 'fa-chart-gantt', label: '일정 관리 (Gantt)' },
+                                { id: 'list', icon: 'fa-list-check', label: '전체 목록 관리' },
+                                { id: 'settings', icon: 'fa-gear', label: '설정 (조직/직급)' },
+                            ].map(item => (
+                                <button
+                                    key={item.id}
+                                    onClick={() => setView(item.id)}
+                                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm transition-colors ${view === item.id ? 'bg-brand-600 text-white font-bold' : 'hover:bg-slate-800'}`}
+                                >
+                                    <i className={`fa-solid ${item.icon} w-5`}></i>
+                                    {item.label}
+                                </button>
+                            ))}
+                        </nav>
+                        <div className="p-4 border-t border-slate-800 text-xs text-slate-500 space-y-2">
+                            <div className="flex items-center gap-2">
+                                <i className={`fa-solid ${cloudStatus === 'connected' ? 'fa-cloud' : cloudStatus === 'syncing' ? 'fa-cloud-arrow-up' : cloudStatus === 'error' ? 'fa-cloud-bolt' : 'fa-cloud-slash'} ${cloudStatus === 'connected' ? 'text-emerald-400' : cloudStatus === 'syncing' ? 'text-sky-400' : cloudStatus === 'error' ? 'text-amber-400' : 'text-slate-500'}`}></i>
+                                <span className={`${cloudStatus === 'connected' ? 'text-emerald-300' : cloudStatus === 'syncing' ? 'text-sky-300' : cloudStatus === 'error' ? 'text-amber-300' : 'text-slate-500'}`}>
+                                    {cloudStatus === 'connected' && '클라우드 연결됨'}
+                                    {cloudStatus === 'syncing' && '클라우드 동기화중'}
+                                    {cloudStatus === 'error' && '클라우드 오류 (로컬 캐시)'}
+                                    {cloudStatus === 'local' && '로컬 모드'}
+                                    {cloudStatus === 'checking' && '클라우드 확인중'}
+                                </span>
+                            </div>
+                            <div>System v1.0.0</div>
+                        </div>
+                    </aside>
+
+                    <div className="md:hidden fixed top-0 w-full bg-slate-900 text-white z-50 p-4 flex justify-between items-center">
+                        <span className="font-bold"><i className="fa-solid fa-shield-halved text-brand-500 mr-2"></i>SecOps</span>
+                        <button className="text-slate-300"><i className="fa-solid fa-bars"></i></button>
+                    </div>
+
+                    <main className="flex-1 overflow-y-auto p-4 md:p-8 mt-14 md:mt-0">
+                        <header className="mb-8 flex justify-between items-center">
+                            <div>
+                                <h2 className="text-2xl font-bold text-slate-800">
+                                    {view === 'dashboard' && '대시보드'}
+                                    {view === 'gantt' && '일정 관리 (Gantt)'}
+                                    {view === 'list' && '예외 신청 목록'}
+                                    {view === 'settings' && '시스템 설정'}
+                                </h2>
+                                <p className="text-slate-500 text-sm mt-1">오늘 날짜: {new Date().toLocaleDateString('ko-KR')}</p>
+                            </div>
+                            {view !== 'settings' && (
+                                <Button onClick={openExemptModal} variant="primary" className="hidden md:flex shadow-lg shadow-brand-500/30">
+                                    <i className="fa-solid fa-plus"></i> 예외 신청 등록
+                                </Button>
+                            )}
+                        </header>
+
+                        {view === 'dashboard' && renderDashboard()}
+                        {view === 'gantt' && renderGantt()}
+                        {view === 'list' && renderList()}
+                        {view === 'settings' && renderSettings()}
+                    </main>
+
+                    {/* Modals */}
+                    {isExemptModalOpen && (
+                        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm fade-in">
+                            <Card className="w-full max-w-lg">
+                                <h3 className="font-bold text-xl mb-4">보안 예외 신청 등록</h3>
+                                <form ref={exemptFormRef} onSubmit={handleAddExemption} className="space-y-4">
+                                    <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-3">
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                            <div>
+                                                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">이름</label>
+                                                <input name="newUserName" type="text" className="w-full border border-slate-300 rounded px-3 py-2 focus:ring-2 focus:ring-brand-500 focus:outline-none" placeholder="이름 입력" />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">부서</label>
+                                                <select name="newUserDept" className="w-full border border-slate-300 rounded px-3 py-2 focus:ring-2 focus:ring-brand-500 focus:outline-none">
+                                                    {departments.map(d => <option key={d} value={d}>{d}</option>)}
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">직급</label>
+                                                <select name="newUserTitle" className="w-full border border-slate-300 rounded px-3 py-2 focus:ring-2 focus:ring-brand-500 focus:outline-none">
+                                                    {jobTitles.map(t => <option key={t} value={t}>{t}</option>)}
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <p className="text-xs text-blue-600"><i className="fa-solid fa-circle-info"></i> 입력한 이름/부서/직급과 동일한 사용자가 있으면 재사용하고, 없으면 자동 등록합니다.</p>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-medium mb-1">전자결재 승인 PDF</label>
+                                        <input onChange={handlePdfUpload} type="file" accept="application/pdf" className="w-full border rounded px-3 py-2 focus:ring-1 focus:ring-brand-500 bg-white" />
+                                        <div className="text-xs mt-2 text-slate-500">{uploadedPdfName ? '업로드 파일: ' + uploadedPdfName : 'PDF를 업로드하면 신청 정보가 자동 입력됩니다.'}</div>
+                                        {isPdfParsing && <div className="text-xs mt-1 text-brand-600">PDF 분석 중...</div>}
+                                        {pdfApprovalStatus === 'approved' && <div className="text-xs mt-1 text-green-600">승인 상태 확인 완료</div>}
+                                        {pdfApprovalStatus === 'not-approved' && <div className="text-xs mt-1 text-red-600">승인 상태 미확인(반려/취소 포함) - 자동등록 불가</div>}
+                                        {pdfApprovalStatus === 'parse-failed' && <div className="text-xs mt-1 text-red-600">PDF 파싱 실패 - 수동 입력 후 등록하세요.</div>}
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="col-span-2 flex items-center mb-1">
+                                            <input id="permCheck" type="checkbox" className="w-4 h-4 text-brand-600 rounded focus:ring-brand-500 border-gray-300" checked={isPermanentFormValue} onChange={(e) => setIsPermanentFormValue(e.target.checked)}/>
+                                            <label htmlFor="permCheck" className="ml-2 text-sm font-bold text-slate-700">항시 예외 (기간 없음)</label>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium mb-1">시작일</label>
+                                            <input required name="startDate" type="date" className="w-full border rounded px-3 py-2 focus:ring-1 focus:ring-brand-500" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium mb-1 text-slate-700">종료일</label>
+                                            <input required={!isPermanentFormValue} disabled={isPermanentFormValue} name="endDate" type="date" className={`w-full border rounded px-3 py-2 focus:ring-1 focus:ring-brand-500 ${isPermanentFormValue ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''}`} />
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-medium mb-1">신청 사유</label>
+                                        <input name="reason" type="text" className="w-full border rounded px-3 py-2 focus:ring-1 focus:ring-brand-500" placeholder="예: 프로젝트 화면 기획 업무" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium mb-1">전자결재 문서 번호</label>
+                                        <input name="docNumber" type="text" className="w-full border rounded px-3 py-2 focus:ring-1 focus:ring-brand-500" placeholder="예: 2024-SEC-001" />
+                                    </div>
+                                    <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-slate-100">
+                                        <Button onClick={() => setIsExemptModalOpen(false)} variant="secondary">취소</Button>
+                                        <Button type="submit" variant="primary" disabled={isPdfParsing}>
+                                            등록
+                                        </Button>
+                                    </div>
+                                </form>
+                            </Card>
+                        </div>
+                    )}
+
+                    {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
