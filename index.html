@@ -461,6 +461,15 @@
             const exemptFormRef = useRef(null);
             const cloudSyncRef = useRef({ enabled: false, docRef: null });
             const cloudSaveTimerRef = useRef(null);
+            const dataRef = useRef({
+                users: [],
+                exemptions: [],
+                departments: ['보안팀', '인사팀', '개발팀', '영업팀'],
+                jobTitles: ['사원', '대리', '과장', '차장', '부장', '팀장'],
+                availableYears: ['2024', '2025', '2026'],
+                logs: [],
+                backups: []
+            });
 
             // Data persistence helpers
             const showToast = (message, type = 'success') => setToast({ message, type });
@@ -485,18 +494,16 @@
                 };
             };
 
-            const persistLocalPayload = (payload, updatedAt = null) => {
-                localStorage.setItem('sec_app_users', JSON.stringify(payload.users));
-                localStorage.setItem('sec_app_exemptions', JSON.stringify(payload.exemptions));
-                localStorage.setItem('sec_app_depts', JSON.stringify(payload.departments));
-                localStorage.setItem('sec_app_titles', JSON.stringify(payload.jobTitles));
-                localStorage.setItem('sec_app_years', JSON.stringify(payload.availableYears));
-                localStorage.setItem('sec_app_logs', JSON.stringify(payload.logs));
-                localStorage.setItem('sec_app_backups', JSON.stringify(payload.backups));
-                localStorage.setItem('sec_app_updated_at', updatedAt || new Date().toISOString());
-            };
-
             const applyPayloadToState = (payload) => {
+                dataRef.current = {
+                    users: payload.users,
+                    exemptions: payload.exemptions,
+                    departments: payload.departments,
+                    jobTitles: payload.jobTitles,
+                    availableYears: payload.availableYears,
+                    logs: payload.logs,
+                    backups: payload.backups
+                };
                 setUsers(payload.users);
                 setExemptions(payload.exemptions);
                 setDepartments(payload.departments);
@@ -506,24 +513,26 @@
                 setBackups(payload.backups);
             };
 
-            const buildPayload = (overrides = {}) => ({
-                users: overrides.users ?? users,
-                exemptions: overrides.exemptions ?? exemptions,
-                departments: overrides.departments ?? departments,
-                jobTitles: overrides.jobTitles ?? jobTitles,
-                availableYears: (overrides.availableYears ?? availableYears).map(String).sort((a, b) => Number(a) - Number(b)),
-                logs: (overrides.logs ?? logs).slice(0, 500),
-                backups: (overrides.backups ?? backups).slice(0, 7)
-            });
+            const buildPayload = (overrides = {}) => {
+                const base = dataRef.current;
+                return {
+                    users: overrides.users ?? base.users,
+                    exemptions: overrides.exemptions ?? base.exemptions,
+                    departments: overrides.departments ?? base.departments,
+                    jobTitles: overrides.jobTitles ?? base.jobTitles,
+                    availableYears: (overrides.availableYears ?? base.availableYears).map(String).sort((a, b) => Number(a) - Number(b)),
+                    logs: (overrides.logs ?? base.logs).slice(0, 500),
+                    backups: (overrides.backups ?? base.backups).slice(0, 7)
+                };
+            };
 
             const scheduleCloudSave = (overrides = {}) => {
                 const payload = buildPayload(overrides);
-
                 const stampedAt = new Date().toISOString();
-                persistLocalPayload(payload, stampedAt); // immediate local cache for refresh safety
 
                 if (!cloudSyncRef.current.enabled || !cloudSyncRef.current.docRef) {
-                    setCloudStatus('local');
+                    setCloudStatus('error');
+                    showToast('클라우드 연결 후 저장할 수 있습니다.', 'error');
                     return;
                 }
 
@@ -536,31 +545,22 @@
                     } catch (err) {
                         console.error('Cloud sync save error', err);
                         setCloudStatus('error');
+                        showToast('클라우드 저장 중 오류가 발생했습니다.', 'error');
                     }
                 }, 450);
             };
 
-            // Load Data (local first, then cloud)
+            // Load Data (cloud only)
             useEffect(() => {
                 let unmounted = false;
 
                 const init = async () => {
                     try {
-                        const localRaw = {
-                            users: JSON.parse(localStorage.getItem('sec_app_users') || '[]'),
-                            exemptions: JSON.parse(localStorage.getItem('sec_app_exemptions') || '[]'),
-                            departments: JSON.parse(localStorage.getItem('sec_app_depts') || '["보안팀","인사팀","개발팀","영업팀"]'),
-                            jobTitles: JSON.parse(localStorage.getItem('sec_app_titles') || '["사원","대리","과장","차장","부장","팀장"]'),
-                            availableYears: JSON.parse(localStorage.getItem('sec_app_years') || '["2024","2025","2026"]'),
-                            logs: JSON.parse(localStorage.getItem('sec_app_logs') || '[]'),
-                            backups: JSON.parse(localStorage.getItem('sec_app_backups') || '[]'),
-                            updatedAt: localStorage.getItem('sec_app_updated_at') || null
-                        };
-                        const localPayload = normalizePayload(localRaw, localRaw);
-                        if (!unmounted) applyPayloadToState(localPayload);
+                        const defaultPayload = normalizePayload({}, buildPayload());
 
                         if (!window.firebase || !window.firebase.firestore) {
-                            setCloudStatus('local');
+                            setCloudStatus('error');
+                            showToast('클라우드 모듈을 불러오지 못했습니다.', 'error');
                             return;
                         }
 
@@ -576,30 +576,21 @@
 
                         const snap = await docRef.get();
                         if (!snap.exists) {
-                            await docRef.set({ ...localPayload, updatedAt: new Date().toISOString() }, { merge: true });
+                            await docRef.set({ ...defaultPayload, updatedAt: new Date().toISOString() }, { merge: true });
+                            if (!unmounted) applyPayloadToState(defaultPayload);
                             setCloudStatus('connected');
                             return;
                         }
 
                         const cloudRaw = snap.data() || {};
-                        const cloudPayload = normalizePayload(cloudRaw, localPayload);
-                        const localTs = Date.parse(localRaw.updatedAt || '') || 0;
-                        const cloudTs = Date.parse(cloudRaw.updatedAt || '') || 0;
-
+                        const cloudPayload = normalizePayload(cloudRaw, defaultPayload);
                         if (!unmounted) {
-                            if (cloudTs >= localTs) {
-                                applyPayloadToState(cloudPayload);
-                                persistLocalPayload(cloudPayload, cloudRaw.updatedAt || new Date().toISOString());
-                            } else {
-                                // Local cache is newer (e.g., recent edits before cloud sync finished)
-                                applyPayloadToState(localPayload);
-                                scheduleCloudSave(localPayload);
-                            }
+                            applyPayloadToState(cloudPayload);
                         }
                     } catch (e) {
                         console.error('Data load error', e);
                         setCloudStatus('error');
-                        showToast('데이터 로드 중 오류가 발생했습니다.', 'error');
+                        showToast('클라우드 데이터 로드 중 오류가 발생했습니다.', 'error');
                     }
                 };
 
@@ -611,18 +602,19 @@
             }, []);
 
             const saveExemptions = (newExemptions) => {
-                setExemptions(newExemptions);
+                const nextPayload = buildPayload({ exemptions: newExemptions });
+                applyPayloadToState(nextPayload);
                 scheduleCloudSave({ exemptions: newExemptions });
             };
             const saveUsers = (newUsers) => {
-                setUsers(newUsers);
+                const nextPayload = buildPayload({ users: newUsers });
+                applyPayloadToState(nextPayload);
                 scheduleCloudSave({ users: newUsers });
             };
             const saveSettings = (newDepts, newTitles, newYears) => {
                 const normalizedYears = newYears.map(String).sort((a, b) => Number(a) - Number(b));
-                setDepartments(newDepts);
-                setJobTitles(newTitles);
-                setAvailableYears(normalizedYears);
+                const nextPayload = buildPayload({ departments: newDepts, jobTitles: newTitles, availableYears: normalizedYears });
+                applyPayloadToState(nextPayload);
                 scheduleCloudSave({ departments: newDepts, jobTitles: newTitles, availableYears: normalizedYears });
                 addLog('SETTINGS_UPDATE', '조직/직급/연도 설정 저장');
                 showToast("설정이 저장되었습니다.", "success");
@@ -630,7 +622,8 @@
 
             const saveLogs = (newLogs) => {
                 const bounded = newLogs.slice(0, 500);
-                setLogs(bounded);
+                const nextPayload = buildPayload({ logs: bounded });
+                applyPayloadToState(nextPayload);
                 scheduleCloudSave({ logs: bounded });
             };
 
@@ -641,28 +634,22 @@
                     detail,
                     at: new Date().toISOString()
                 };
-                setLogs((prev) => {
-                    const bounded = [newLog, ...prev].slice(0, 500);
-                    scheduleCloudSave({ logs: bounded });
-                    return bounded;
-                });
+                const bounded = [newLog, ...(dataRef.current.logs || [])].slice(0, 500);
+                const nextPayload = buildPayload({ logs: bounded });
+                applyPayloadToState(nextPayload);
+                scheduleCloudSave({ logs: bounded });
             };
 
             const saveBackups = (newBackups) => {
                 const bounded = newBackups.slice(0, 7);
-                setBackups(bounded);
+                const nextPayload = buildPayload({ backups: bounded });
+                applyPayloadToState(nextPayload);
                 scheduleCloudSave({ backups: bounded });
             };
 
             const applyImportedData = (data) => {
                 const payload = normalizePayload(data, buildPayload());
-                setUsers(payload.users);
-                setExemptions(payload.exemptions);
-                setDepartments(payload.departments);
-                setJobTitles(payload.jobTitles);
-                setAvailableYears(payload.availableYears);
-                setLogs(payload.logs);
-                setBackups(payload.backups);
+                applyPayloadToState(payload);
                 scheduleCloudSave(payload);
             };
 
@@ -1150,7 +1137,7 @@
                     isPermanent: isPermanentFormValue,
                     reason,
                     docNumber,
-                    status: 'Active'
+                    status: '활성'
                 };
                 saveExemptions([...exemptions, newExemption]);
                 addLog('EXEMPTION_CREATE', newExemption.userName + ' 예외 등록 (' + (newExemption.isPermanent ? '항시' : (newExemption.startDate + '~' + newExemption.endDate)) + ')');
@@ -1216,28 +1203,28 @@
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                             <Card className="border-l-4 border-l-brand-600 relative overflow-hidden">
                                 <div className="relative z-10">
-                                    <p className="text-xs font-bold text-slate-500 uppercase mb-1">Total Active</p>
+                                    <p className="text-xs font-bold text-slate-500 uppercase mb-1">현재 활성 예외</p>
                                     <h3 className="text-3xl font-extrabold text-slate-800">{activeCount}<span className="text-sm font-normal text-slate-400 ml-1">명</span></h3>
                                 </div>
                                 <i className="fa-solid fa-shield-halved absolute -bottom-2 -right-2 text-6xl text-brand-50 opacity-50"></i>
                             </Card>
                             <Card className="border-l-4 border-l-purple-500 relative overflow-hidden">
                                 <div className="relative z-10">
-                                    <p className="text-xs font-bold text-slate-500 uppercase mb-1">Permanent</p>
+                                    <p className="text-xs font-bold text-slate-500 uppercase mb-1">항시 예외</p>
                                     <h3 className="text-3xl font-extrabold text-slate-800">{permanentCount}<span className="text-sm font-normal text-slate-400 ml-1">명</span></h3>
                                 </div>
                                 <i className="fa-solid fa-infinity absolute -bottom-2 -right-2 text-6xl text-purple-50 opacity-50"></i>
                             </Card>
                             <Card className="border-l-4 border-l-orange-500 relative overflow-hidden">
                                 <div className="relative z-10">
-                                    <p className="text-xs font-bold text-slate-500 uppercase mb-1">Expiring Soon</p>
+                                    <p className="text-xs font-bold text-slate-500 uppercase mb-1">당월 만료 예정</p>
                                     <h3 className="text-3xl font-extrabold text-slate-800">{expiringSoon}<span className="text-sm font-normal text-slate-400 ml-1">건</span></h3>
                                 </div>
                                 <i className="fa-solid fa-clock-rotate-left absolute -bottom-2 -right-2 text-6xl text-orange-50 opacity-50"></i>
                             </Card>
                             <Card className="border-l-4 border-l-slate-500 relative overflow-hidden">
                                 <div className="relative z-10">
-                                    <p className="text-xs font-bold text-slate-500 uppercase mb-1">Total Users</p>
+                                    <p className="text-xs font-bold text-slate-500 uppercase mb-1">총 사용자</p>
                                     <h3 className="text-3xl font-extrabold text-slate-800">{totalUsers}<span className="text-sm font-normal text-slate-400 ml-1">명</span></h3>
                                 </div>
                                 <i className="fa-solid fa-users absolute -bottom-2 -right-2 text-6xl text-slate-50 opacity-50"></i>
@@ -1261,7 +1248,7 @@
                                         <h3 className="text-2xl font-extrabold text-slate-800">{buckets.dday}<span className="text-sm font-normal text-slate-400 ml-1">건</span></h3>
                                     </Card>
                                     <Card className="border-l-4 border-l-slate-500">
-                                        <p className="text-xs font-bold text-slate-500 uppercase mb-1">Expired</p>
+                                        <p className="text-xs font-bold text-slate-500 uppercase mb-1">만료</p>
                                         <h3 className="text-2xl font-extrabold text-slate-800">{buckets.expired}<span className="text-sm font-normal text-slate-400 ml-1">건</span></h3>
                                     </Card>
                                 </div>
@@ -1329,7 +1316,7 @@
                                                 </div>
                                                 <div className="text-right">
                                                     <span className={`text-xs font-bold ${isExemptionActive(ex) ? 'text-green-600' : 'text-slate-400'}`}>
-                                                        {isExemptionActive(ex) ? 'Active' : 'Expired'}
+                                                        {isExemptionActive(ex) ? '활성' : '만료'}
                                                     </span>
                                                     <p className="text-[10px] text-slate-400">{formatDate(ex.startDate)}</p>
                                                 </div>
@@ -1340,7 +1327,7 @@
                                 </div>
                             </Card>
 
-                            {/* Permanent Users List */}
+                            {/* 항시 예외 Users List */}
                             <Card className="h-96 flex flex-col border-t-4 border-t-purple-500">
                                 <h4 className="font-bold text-purple-900 mb-4 flex items-center gap-2 border-b border-purple-100 pb-2">
                                     <i className="fa-solid fa-infinity text-purple-500"></i> 항시 예외 사용자 목록
@@ -1656,8 +1643,7 @@
                                 <span className={`${cloudStatus === 'connected' ? 'text-emerald-300' : cloudStatus === 'syncing' ? 'text-sky-300' : cloudStatus === 'error' ? 'text-amber-300' : 'text-slate-500'}`}>
                                     {cloudStatus === 'connected' && '클라우드 연결됨'}
                                     {cloudStatus === 'syncing' && '클라우드 동기화중'}
-                                    {cloudStatus === 'error' && '클라우드 오류 (로컬 캐시)'}
-                                    {cloudStatus === 'local' && '로컬 모드'}
+                                    {cloudStatus === 'error' && '클라우드 오류'}
                                     {cloudStatus === 'checking' && '클라우드 확인중'}
                                 </span>
                             </div>
